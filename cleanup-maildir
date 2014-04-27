@@ -65,19 +65,18 @@ EXAMPLES
 """
 
 __version__ = "0.2.3"
-# $Id$
-# $URL$
 
+import re
+import os
+import sys
+import time
+import getopt
+import rfc822
+import socket
 import mailbox
 import os.path
-import os
-import rfc822
-import string
-import socket
-import time
 import logging
-import sys
-import getopt
+import email.Header
 
 
 def mkMaildir(path):
@@ -87,16 +86,13 @@ def mkMaildir(path):
     os.mkdir(os.path.join(path, 'new'), 0700)
     os.mkdir(os.path.join(path, 'cur'), 0700)
 
+
 def get_flname(obj):
-    if sys.version_info[0] <= 2 and sys.version_info[1] < 5:
-        return obj.name
-    else:
-        return obj._file.name
+    return obj._file.name
+
 
 class MaildirWriter(object):
-
     """Deliver messages into a Maildir"""
-
     path = None
     counter = 0
 
@@ -106,7 +102,7 @@ class MaildirWriter(object):
         Arguments:
         path -- if specified, used as the default Maildir for this object
         """
-        if path != None:
+        if path is not None:
             if not os.path.isdir(path):
                 raise ValueError, 'Path does not exist: %s' % path
             self.path = path
@@ -119,19 +115,19 @@ class MaildirWriter(object):
         msg -- a message object
         path -- the path of the Maildir; if None, uses default from __init__
         """
-        if path != None:
+        if path is not None:
             self.path = path
-        if self.path == None or not os.path.isdir(self.path):
+        if self.path is None or not os.path.isdir(self.path):
             raise ValueError, 'Path does not exist'
         tryCount = 1
-        srcFile = get_flname(msg.fp)
-        (dstName, tmpFile, newFile, dstFile) = (None, None, None, None)
+        srcFile = msg.fp._file.name
+        dstName, tmpFile, newFile, dstFile = None, None, None, None
         while 1:
             try:
                 dstName = "%d.%d_%d.%s" % (int(time.time()), os.getpid(), 
                                            self.counter, socket.gethostname())
-                tmpFile = os.path.join(os.path.join(self.path, "tmp"), dstName)
-                newFile = os.path.join(os.path.join(self.path, "new"), dstName)
+                tmpFile = os.path.join(self.path, "tmp", dstName)
+                newFile = os.path.join(self.path, "new", dstName)
                 self.logger.debug("deliver: attempt copy %s to %s" %
                               (srcFile, tmpFile))
                 os.link(srcFile, tmpFile) # Copy into tmp
@@ -157,7 +153,7 @@ class MaildirWriter(object):
 
         # Move message to cur and restore any flags
         dstFile = os.path.join(os.path.join(self.path, "cur"), dstName)
-        if msg.getFlags() != None:
+        if msg.getFlags() is not None:
             dstFile += ':' + msg.getFlags()
         self.logger.debug("deliver: attempt link to %s" % dstFile)
         os.link(newFile, dstFile)
@@ -173,17 +169,17 @@ class MessageDateError(TypeError):
 
 
 class MaildirMessage(rfc822.Message):
-    
     """An email message
 
     Has extra Maildir-specific attributes
     """
+    flagged_re = re.compile(r':.*F')
+    new_re = re.compile(r':.*S')
 
     def isFlagged(self):
         """return true if the message is flagged as important"""
-        import re
         fname = get_flname(self.fp)
-        if re.search(r':.*F', fname) != None:
+        if self.flagged_re.search(fname) is not None:
             return True
         return False
 
@@ -197,21 +193,18 @@ class MaildirMessage(rfc822.Message):
     def isNew(self):
         """return true if the message is marked as unread"""
         # XXX should really be called isUnread
-        import re
         fname = get_flname(self.fp)
-        if re.search(r':.*S', fname) != None:
+        if self.new_re.search(fname) is not None:
             return False
         return True
 
     def getSubject(self):
         """get the message's subject as a unicode string"""
-
-        import email.Header
         s = self.getheader("Subject")
         try:
             return u"".join(map(lambda x: x[0].decode(x[1] or 'ASCII', 'replace'),
                                 email.Header.decode_header(s)))
-        except(LookupError):
+        except LookupError:
             return s
 
     def getSubjectHash(self):
@@ -220,12 +213,10 @@ class MaildirMessage(rfc822.Message):
         This currently means lowercasing and removing any reply or forward
         indicators.
         """
-        import re
-        import string
         s = self.getSubject()
-        if s == None:
+        if s is None:
             return '(no subject)'
-        return re.sub(r'^(re|fwd?):\s*', '', string.strip(s.lower()))
+        return re.sub(r'^(re|fwd?):\s*', '', s.lower().strip())
 
     def getDateSent(self):
         """Get the time of sending from the Date header
@@ -235,7 +226,7 @@ class MaildirMessage(rfc822.Message):
         Throws a MessageDateError if the Date header is missing or invalid.
         """
         dh = self.getheader('Date')
-        if dh == None: 
+        if dh is None:
             return None
         try:
             return time.mktime(rfc822.parsedate(dh))
@@ -255,7 +246,7 @@ class MaildirMessage(rfc822.Message):
         """Get the time the message was sent, fall back on time received"""
         try:
             d = self.getDateSent()
-            if d != None:
+            if d is not None:
                 return d
         except MessageDateError:
             pass
@@ -269,7 +260,6 @@ class MaildirMessage(rfc822.Message):
 
 
 class MaildirCleaner(object):
-
     """Clean a maildir by deleting or moving old messages"""
 
     __trashWriter = None
@@ -308,7 +298,7 @@ class MaildirCleaner(object):
     def scanSubjects(self, folderName):
         """Scans for flagged subjects"""
         self.logger.info("Scanning for flagged subjects...")
-        if (folderName == 'INBOX'):
+        if folderName == 'INBOX':
             path = self.folderBase
         else:
             path = os.path.join(self.folderBase, self.folderPrefix + folderName)
@@ -320,9 +310,7 @@ class MaildirCleaner(object):
                 self.logger.debug("Flagged (%d): %s", i, msg.getSubjectHash())
         self.logger.info("Done scanning.")
 
-
     def clean(self, mode, folderName, minAge):
-
         """Trashes or archives messages older than minAge days
 
         Arguments:
@@ -338,16 +326,16 @@ class MaildirCleaner(object):
         if not mode in ('trash', 'archive', 'delete'):
             raise ValueError
 
-        if (self.keepFlaggedThreads):
+        if self.keepFlaggedThreads:
             self.scanSubjects(folderName)
 
         archiveFolder = self.archiveFolder
-        if (archiveFolder == None):
-            if (folderName == 'INBOX'):
+        if archiveFolder is None:
+            if folderName == 'INBOX':
                 archiveFolder = ""
             else:
                 archiveFolder = folderName
-        if (folderName == 'INBOX'):
+        if folderName == 'INBOX':
             path = self.folderBase
         else:
             path = os.path.join(self.folderBase, self.folderPrefix + folderName)
@@ -360,22 +348,20 @@ class MaildirCleaner(object):
 
         # Move old messages
         for i, msg in enumerate(maildir):
-            if self.keepFlaggedThreads == True \
-                    and msg.getSubjectHash() in self.keepSubjects:
+            if self.keepFlaggedThreads and msg.getSubjectHash() in self.keepSubjects:
                 self.log(logging.DEBUG, "Keeping #%d (topic flagged)" % i, msg)
             else:
-                if (msg.getAge() >= minAge) and ((not self.keepRead) or (self.keepRead and msg.isNew())):
+                if (msg.getAge() >= minAge) and (not self.keepRead or self.keepRead and msg.isNew()):
                     if mode == 'trash':
-                        self.log(logging.INFO, "%sTrashing #%d (old)" %
-                                 (fakeMsg, i), msg)
+                        self.log(logging.INFO, "%sTrashing #%d (old)" % (fakeMsg, i), msg)
                         if not self.isTrialRun:
                             self.trashWriter.deliver(msg)
-                            os.unlink(get_flname(msg.fp))
+                            os.unlink(msg.fp._file.name)
                     elif mode == 'delete':
                         self.log(logging.INFO, "%sDeleting #%d (old)" % 
                                  (fakeMsg, i), msg)
                         if not self.isTrialRun:
-                            os.unlink(get_flname(msg.fp))
+                            os.unlink(msg.fp._file.name)
                     else: # mode == 'archive'
                         # Determine subfolder path
                         mdate = time.gmtime(msg.getDateSentOrRecd())
@@ -398,7 +384,7 @@ class MaildirCleaner(object):
                                 mkMaildir(sfPath)
                             # Deliver
                             self.__mdWriter.deliver(msg, sfPath)
-                            os.unlink(get_flname(msg.fp))
+                            os.unlink(msg.fp._file.name)
                     self.stats[mode] += 1
                 else:
                     self.log(logging.DEBUG, "Keeping #%d (fresh)" % i, msg)
