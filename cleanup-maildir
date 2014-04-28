@@ -78,6 +78,8 @@ import os.path
 import logging
 import email.Header
 
+from email.errors import HeaderParseError
+
 
 def mkMaildir(path):
     """Make a Maildir structure rooted at 'path'"""
@@ -204,7 +206,7 @@ class MaildirMessage(rfc822.Message):
         try:
             return u"".join(map(lambda x: x[0].decode(x[1] or 'ASCII', 'replace'),
                                 email.Header.decode_header(s)))
-        except LookupError:
+        except (LookupError, HeaderParseError):
             return s
 
     def getSubjectHash(self):
